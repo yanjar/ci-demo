@@ -1,9 +1,9 @@
 name: 'wiz-cli-ci-scan'
-on: 
+on:
   pull_request:
-    branches: 
+    branches:
     - main
-    
+
 jobs:
   wiz-cli-container-scan:
     if: contains(github.event.pull_request.head.ref, 'container')
@@ -11,18 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Set the relative path in the repo to scan
-      
       SCAN_PATH_FAIL: "container"
-      IMAGE: mccbryan/setestimage
+      # Docker Image Info
+      IMAGE: yanjar/cidemo
       TAG: ${{github.run_number}}
-      IAC_POLICY: "iac-fail-medium" # Set the desired Wiz-cli policy to use
-      VULN_POLICIES: "vuln-one-medium" # Set the desired Wiz-cli policy to use
-      WIZ_CLIENT_ID: ${{ secrets.WIZ_CLIENT_ID }}
-      WIZ_CLIENT_SECRET: ${{ secrets.WIZ_CLIENT_SECRET }}
-      GH_USER: ${{ secrets.GH_USER }}
-      GH_PASS: ${{ secrets.GH_PASS }}
-      #WIZ_ENV: ${{ secrets.WIZ_ENV }}
-
+      # Set the desired Wiz-cli policies to use
+      DIR_POLICY: "Jared-Yanna-Vuln,Jared-Yanna-Secrets"
+      IAC_POLICY: "Jared-Yanna-IaC,Jared-Yanna-Secrets"
+      VULN_POLICIES: "Jared-Yanna-Vuln,Jared-Yanna-Secrets"
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
       run:
@@ -33,56 +29,50 @@ jobs:
     - name: Check out repository
       uses: actions/checkout@v2
 
-    - name: Docker Login
-      uses: docker/login-action@v3.0.0
-      with:
-        username: ${{ env.GH_USER }}
-        password: ${{ env.GH_PASS }}
-    
     - name: Set path based on fail branch
       run: echo "SCAN_PATH=$SCAN_PATH_FAIL" >> $GITHUB_ENV
       if: contains(github.event.pull_request.head.ref, 'container')
 
-    - name: Download Wiz-cli
+    # Download and Authenticate to Wiz CLI
+    - name: Download and Authenticate to Wiz
       run: |
-        curl -Lo wizcli https://wizcli.app.wiz.io/latest/wizcli-linux-amd64 && chmod +x wizcli
-        ./wizcli version
+        curl -o wizcli https://wizcli.app.wiz.io/latest/wizcli && chmod +x wizcli
+        ./wizcli auth --id "$WIZ_CLIENT_ID" --secret "$WIZ_CLIENT_SECRET"
+      env:
+        WIZ_CLIENT_ID: ${{ secrets.WIZ_CLIENT_ID }}
+        WIZ_CLIENT_SECRET: ${{ secrets.WIZ_CLIENT_SECRET }}
 
-    - name: Authenticate to Wiz
-      run: ./wizcli auth --id "$WIZ_CLIENT_ID" --secret "$WIZ_CLIENT_SECRET"
-
+    # Directory Scan
     - name: Run wiz-cli Dir scan
       id: wizcli-dir-scan
-      run: |
-        ./wizcli dir scan --path ${{ env.SCAN_PATH }}  --output wiz-dir-scan-results.json,sarif,true
-    
+      run: ./wizcli dir scan --path ${{ env.SCAN_PATH }}  --output wiz-dir-scan-results.json,sarif,true
+
     - uses: github/codeql-action/upload-sarif@v2
       with:
         category: directory-scans
         sarif_file: wiz-dir-scan-results.json
       continue-on-error: true
       if: steps.wizcli-dir-scan.conclusion == 'success'
-      
+
+    # IaC Scan
     - name: Run wiz-cli IaC scan
       id: wizcli-iac-scan
-      run: |
-        ./wizcli iac scan --path ${{ env.SCAN_PATH }} --policy "$IAC_POLICY" --output wiz-iac-scan-results.json,sarif,true --policy-hits-only
-    
+      run: ./wizcli iac scan --path ${{ env.SCAN_PATH }} --policy "$IAC_POLICY" --output wiz-iac-scan-results.json,sarif,true --policy-hits-only
+
     - uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: wiz-iac-scan-results.json
       continue-on-error: true
       if: steps.wizcli-iac-scan.conclusion == 'success'
 
+    # Docker Image Scan
     - name: Build the Docker image
-      run: |
-        docker build ${{ env.SCAN_PATH }} -t $IMAGE:$TAG
+      run: docker build ${{ env.SCAN_PATH }} -t $IMAGE:$TAG
       if: always()
-    
+
     - name: Run wiz-cli Docker scan
       id: wizcli-docker-scan
-      run: |
-        ./wizcli docker scan --image $IMAGE:$TAG --policy "$VULN_POLICIES" --policy-hits-only --dockerfile ${{ env.SCAN_PATH }}/Dockerfile --output wiz-image-scan-results.json,sarif,true
+      run: ./wizcli docker scan --image $IMAGE:$TAG --policy "$VULN_POLICIES" --policy-hits-only --dockerfile ${{ env.SCAN_PATH }}/Dockerfile --output wiz-image-scan-results.json,sarif,true
 
     - uses: github/codeql-action/upload-sarif@v2
       with:
@@ -90,6 +80,12 @@ jobs:
         sarif_file: wiz-image-scan-results.json
       continue-on-error: true
       if: steps.wizcli-docker-scan.conclusion == 'success'
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
 
     - name: Push docker image
       run: |
