@@ -45,25 +45,12 @@ jobs:
     # Directory Scan
     - name: Run wiz-cli Dir scan
       id: wizcli-dir-scan
-      run: ./wizcli dir scan --path ${{ env.SCAN_PATH }}  --output wiz-dir-scan-results.json,sarif,true
-
-    - uses: github/codeql-action/upload-sarif@v2
-      with:
-        category: directory-scans
-        sarif_file: wiz-dir-scan-results.json
-      continue-on-error: true
-      if: steps.wizcli-dir-scan.conclusion == 'success'
+      run: ./wizcli dir scan --path ${{ env.SCAN_PATH }}  --policy "$DIR_POLICY" --output wiz-dir-scan-results.json,sarif,true
 
     # IaC Scan
     - name: Run wiz-cli IaC scan
       id: wizcli-iac-scan
       run: ./wizcli iac scan --path ${{ env.SCAN_PATH }} --policy "$IAC_POLICY" --output wiz-iac-scan-results.json,sarif,true --policy-hits-only
-
-    - uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: wiz-iac-scan-results.json
-      continue-on-error: true
-      if: steps.wizcli-iac-scan.conclusion == 'success'
 
     # Docker Image Scan
     - name: Build the Docker image
@@ -73,13 +60,6 @@ jobs:
     - name: Run wiz-cli Docker scan
       id: wizcli-docker-scan
       run: ./wizcli docker scan --image $IMAGE:$TAG --policy "$VULN_POLICIES" --policy-hits-only --dockerfile ${{ env.SCAN_PATH }}/Dockerfile --output wiz-image-scan-results.json,sarif,true
-
-    - uses: github/codeql-action/upload-sarif@v2
-      with:
-        category: docker-scans
-        sarif_file: wiz-image-scan-results.json
-      continue-on-error: true
-      if: steps.wizcli-docker-scan.conclusion == 'success'
 
     - name: Login to Docker Hub
       uses: docker/login-action@v3
